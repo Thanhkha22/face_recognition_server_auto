@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Face Recognition Server</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <!-- Gọi face-api.min.js từ thư mục models/ -->
+  <script src="/models/face-api.min.js"></script>
+  <style>
+    /* CSS cho nút bấm */
+    .face-bt {
+      background-color: #FF4954;
+      border: none;
+      color: #FFFFFF;
+      padding: 10px 20px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 5px;
+      transition: background-color 0.3s ease;
+      margin-top: 10px;
+    }
+    /* CSS cho container chính */
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 20px auto;
+      background-color: #fff;
+      padding: 20px;
+      border: 1px solid #ddd;
+    }
+    /* CSS cho phần thông tin */
+    .info-container p, .info-container h3 {
+      margin: 10px 0;
+    }
+    /* CSS cho phần hiển thị khuôn mặt và thông tin */
+    .face-and-info-wrapper {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    .face-info, .side-info {
+      flex: 1;
+    }
+    /* CSS cho phần tính phí */
+    .billing-container {
+      margin-top: 20px;
+    }
+    /* CSS cho layout flex */
+    .flex-container {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    /* CSS cho phần video trực tiếp */
+    .live-feed {
+      border: 2px dashed #aaa;
+      padding: 20px;
+      box-sizing: border-box;
+      width: 50%;
+    }
+    .live-feed-right {
+      flex: 1;
+    }
+    /* CSS cho danh sách kết quả nhận diện */
+    #recognition-list {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-top: 15px;
+      width: 100%;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .result-item {
+      background: #ffffff;
+      padding: 15px 20px;
+      border-radius: 12px;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+      display: flex;
+      align-items: center;
+      width: 100%;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .result-item:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+    }
+    .result-item img {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      margin-right: 15px;
+      object-fit: cover;
+      border: 2px solid #e0e0e0;
+    }
+    .result-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .result-info .info-line {
+      display: inline-block;
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+    }
+    .result-info small {
+      display: block;
+      font-size: 14px;
+      color: #777;
+      margin-top: 5px;
+    }
+    .result-item .result-info span {
+      display: block;
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+    }
+    /* CSS cho video và overlay */
+    #video-container {
+      position: relative;
+      width: 100%;
+      max-width: 640px;
+      margin: auto;
+    }
+    #video {
+      width: 100%;
+      display: block;
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    /* CSS cho phần chuyển đổi chế độ */
+    #modeContainer {
+      text-align: center;
+      margin: 20px auto;
+    }
+    #modeStatus {
+      margin-left: 15px;
+      font-size: 18px;
+      color: #007BFF;
+    }
+    /* Thông báo hiển thị sự kiện tự động */
+    #autoNotification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 128, 0, 0.8);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 5px;
+      display: none;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+  {% include "header.html" %}
+  <main>
+    <!-- Phần chuyển đổi chế độ nhận diện -->
+    <div id="modeContainer">
+      <label for="modeToggle" style="font-weight: bold;">Chọn chế độ nhận diện:</label>
+      <select id="modeToggle">
+        <option value="manual" selected>Thủ công</option>
+        <option value="auto">Tự động</option>
+      </select>
+      <span id="modeStatus">Đang ở chế độ Thủ công</span>
+    </div>
+
+    <!-- Thông báo tự động -->
+    <div id="autoNotification"></div>
+
+    <div class="flash-container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash-message">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </div>
+
+    <div class="container">
+      <div class="flex-container">
+        <section class="live-feed">
+          <div class="live-feed-left">
+            <h2>Live Camera Feed</h2>
+            <div id="video-container">
+              <video id="video" autoplay playsinline></video>
+              <canvas id="overlay"></canvas>
+            </div>
+          </div>
+        </section>
+        <div class="live-feed-right">
+          <h1 style="text-align: center;">Kết quả nhận diện</h1>
+          <div id="recognition-list"></div>
+        </div>
+      </div>
+
+      <div class="face-and-info-wrapper">
+        <section class="face-info">
+          <h2>Nhập thông tin khuôn mặt</h2>
+          <button class="face-bt" type="button" id="captureBtn" onclick="captureFace()">Chụp khuôn mặt</button>
+          <img id="face-display" src="" alt="Khuôn mặt nhận diện" style="display:none; margin-top:10px;">
+          <form id="face-info-form">
+            <label for="face_id">Mã khuôn mặt:</label>
+            <input type="text" id="face_id" name="face_id" required>
+            <label for="name">Tên:</label>
+            <input type="text" id="name" name="name" required>
+            <label for="dob">Ngày sinh:</label>
+            <input type="date" id="dob" name="dob" required>
+            <label for="gender">Giới tính:</label>
+            <select id="gender" name="gender" required>
+              <option value="">Chọn giới tính</option>
+              <option value="Nam">Nam</option>
+              <option value="Nữ">Nữ</option>
+              <option value="Khác">Khác</option>
+            </select>
+            <label for="event_type">Hành động:</label>
+            <select id="event_type" name="event_type" required></select>
+            <input type="hidden" id="face_image" name="face_image" value="">
+            <button type="button" onclick="submitFaceInfo()">Lưu thông tin</button>
+          </form>
+        </section>
+
+        <div class="side-info">
+          <section class="info-container">
+            <h2 style="color: #333;">Thông tin nhận diện</h2>
+            <p style="font-size: 18px;">
+              <strong>Số người hiện tại:</strong> 
+              <span id="current-count" style="color: #FF4954; font-weight: bold;">0</span>
+            </p>
+            <p style="font-size: 18px;">
+              <strong>Thời gian cập nhật:</strong> 
+              <span id="last-update" style="color: #007BFF; font-weight: bold;">N/A</span>
+            </p>
+            <h3 style="color: #333;">Lịch sử nhận diện gần nhất:</h3>
+            <ul id="history-list" class="history-list"></ul>
+          </section>
+          <section class="billing-container">
+            <button class="face-bt" type="button" onclick="handleFeeButton()">Tính tiền theo thời gian</button>
+            <div id="fee-result" style="margin-top:20px; font-size:18px;"></div>
+            <button class="face-bt" id="download-invoice-btn" type="button" onclick="downloadInvoice()" style="display:none;">
+              Tải hóa đơn dưới dạng note
+            </button>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+  {% include "footer.html" %}
+
+  <!-- Script chuyển đổi chế độ -->
+  <script>
+    let currentMode = "manual";
+    const modeToggle = document.getElementById("modeToggle");
+    const modeStatus = document.getElementById("modeStatus");
+    const captureBtn = document.getElementById("captureBtn");
+    const autoNotification = document.getElementById("autoNotification");
+
+    modeToggle.addEventListener("change", function () {
+      currentMode = this.value;
+      updateModeStatus();
+      fetch('/set_auto_recognition', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: currentMode === "auto" })
+      });
+    });
+
+    function updateModeStatus() {
+      modeStatus.innerText = `Đang ở chế độ ${currentMode === "manual" ? "Thủ công" : "Tự động"}`;
+      captureBtn.disabled = currentMode === "auto";
+      captureBtn.style.opacity = currentMode === "auto" ? 0.5 : 1;
+    }
+
+    // Hiển thị thông báo tự động trong 3 giây
+    function showAutoNotification(message) {
+      autoNotification.innerText = message;
+      autoNotification.style.display = "block";
+      setTimeout(() => {
+        autoNotification.style.display = "none";
+      }, 3000);
+    }
+
+    document.addEventListener("DOMContentLoaded", updateModeStatus);
+  </script>
+
+  <!-- Script tính tiền -->
+  <script>
+    let invoiceDisplayed = false;
+    let currentInvoice = null;
+
+    async function handleFeeButton() {
+      if (!invoiceDisplayed) {
+        try {
+          const response = await fetch('/calculate_fee');
+          if (!response.ok) throw new Error("Lỗi khi tính phí");
+          const fees = await response.json();
+          let latestInvoice = null;
+          for (const face_id in fees) {
+            const data = fees[face_id];
+            if (data.sessions && data.sessions.length > 0) {
+              const lastSession = data.sessions[data.sessions.length - 1];
+              const exitTime = new Date(lastSession.exit.replace(/-/g, '/'));
+              if (!latestInvoice || exitTime > new Date(latestInvoice.session.exit.replace(/-/g, '/'))) {
+                latestInvoice = { face_id, name: data.name, total_fee: data.total_fee, session: lastSession };
+              }
+            }
+          }
+          if (latestInvoice) {
+            currentInvoice = latestInvoice;
+            document.getElementById("fee-result").innerText = 
+              `Hóa đơn cho: ${latestInvoice.name}\n` +
+              `Check-in: ${latestInvoice.session.entry}\n` +
+              `Check-out: ${latestInvoice.session.exit}\n` +
+              `Phí của phiên này: ${latestInvoice.session.fee} VNĐ\n` +
+              `Tổng phí: ${latestInvoice.total_fee} VNĐ\n\n` +
+              `Nhấn nút lần nữa để thu tiền.`;
+            document.getElementById("download-invoice-btn").style.display = "block";
+            invoiceDisplayed = true;
+          } else {
+            document.getElementById("fee-result").innerText = "Không có hóa đơn nào để in.";
+          }
+        } catch (error) {
+          console.error(error);
+          alert("Có lỗi xảy ra khi tính phí!");
+        }
+      }
+    }
+
+    function downloadInvoice() {
+      if (!currentInvoice) return alert("Chưa có hóa đơn để tải!");
+      const { entry, exit, fee } = currentInvoice.session;
+      const entryDate = new Date(entry.replace(/-/g, '/'));
+      const exitDate = new Date(exit.replace(/-/g, '/'));
+      const diffMs = exitDate - entryDate;
+      const diffMinutes = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMinutes / 60);
+      const remainingMinutes = diffMinutes % 60;
+      const durationStr = `${diffHours > 0 ? diffHours + " giờ " : ""}${remainingMinutes} phút`;
+
+      const content = 
+        "==================== HÓA ĐƠN THANH TOÁN ====================\n" +
+        `Tên khách hàng: ${currentInvoice.name}\n` +
+        "----------------------------------------------------------\n" +
+        `Thời gian check-in : ${entry}\n` +
+        `Thời gian check-out: ${exit}\n` +
+        `Thời gian sử dụng: ${durationStr}\n` +
+        "----------------------------------------------------------\n" +
+        `Phí của phiên   : ${fee} VNĐ\n` +
+        `Tổng phí        : ${currentInvoice.total_fee} VNĐ\n` +
+        "==========================================================\n" +
+        "Cảm ơn quý khách đã sử dụng dịch vụ!\n";
+
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "invoice.txt";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      alert("Hóa đơn đã được xuất!");
+    }
+  </script>
+
+  <!-- Script xử lý camera và thông tin -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const faceInfoForm = document.getElementById('face-info-form');
+      faceInfoForm.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submitFaceInfo();
+        }
+      });
+      faceInfoForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        await submitFaceInfo();
+        if (document.getElementById('event_type').value === 'Ra') {
+          await handleFeeButton();
+          if (currentInvoice) downloadInvoice();
+        }
+      });
+    });
+
+    function updateEventTypeOptions(lastStatus) {
+      const eventTypeSelect = document.getElementById('event_type');
+      eventTypeSelect.innerHTML = '<option value="">Chọn hành động</option>';
+      if (lastStatus === "Vào") {
+        eventTypeSelect.innerHTML += '<option value="Ra">Ra</option>';
+      } else if (lastStatus === "Ra") {
+        eventTypeSelect.innerHTML += '<option value="Vào">Vào</option>';
+      } else {
+        eventTypeSelect.innerHTML += '<option value="Vào">Vào</option>';
+      }
+    }
+
+    window.addEventListener('load', () => {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => document.getElementById('video').srcObject = stream)
+        .catch(err => {
+          console.error("Không thể truy cập webcam:", err);
+          alert("Không thể truy cập webcam, vui lòng kiểm tra lại thiết bị!");
+        });
+    });
+
+    async function getFaceStatus(faceId) {
+      try {
+        const response = await fetch('/get_history');
+        const history = await response.json();
+        const faceHistory = history.filter(item => item.recognized_faces.face_id === faceId);
+        if (faceHistory.length > 0) {
+          faceHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          return faceHistory[0].event_type;
+        }
+        return null;
+      } catch (err) {
+        console.error(err);
+        return null;
+      }
+    }
+
+    async function captureFace() {
+      if (currentMode === "auto") return;
+      const video = document.getElementById('video');
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        return alert("Webcam chưa sẵn sàng, vui lòng thử lại sau.");
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) return alert("Không thể chụp hình từ video.");
+        const response = await fetch('/upload', { method: 'POST', body: blob });
+        const result = await response.json();
+
+        if (response.ok) {
+          document.getElementById('face-display').src = result.face_image;
+          document.getElementById('face-display').style.display = 'block';
+          document.getElementById('face_image').value = result.face_image;
+          document.getElementById('face_id').value = result.face_id;
+          if (result.name) {
+            document.getElementById('name').value = result.name;
+            document.getElementById('dob').value = result.dob;
+            document.getElementById('gender').value = result.gender || "";
+          }
+          const lastStatus = await getFaceStatus(result.face_id);
+          updateEventTypeOptions(lastStatus);
+          document.getElementById('event_type').value = lastStatus === "Vào" ? "Ra" : "Vào";
+          if (lastStatus === "Vào") submitFaceInfo();
+        } else {
+          alert("Lỗi: " + result.error);
+        }
+      }, 'image/jpeg');
+    }
+
+    async function submitFaceInfo() {
+      const faceId = document.getElementById('face_id').value;
+      const name = document.getElementById('name').value;
+      const dob = document.getElementById('dob').value;
+      const gender = document.getElementById('gender').value;
+      const eventType = document.getElementById('event_type').value;
+      const faceImage = document.getElementById('face_image').value;
+
+      if (!faceId || !faceImage || !eventType) return alert("Vui lòng nhập đầy đủ thông tin!");
+
+      const response = await fetch('/save_info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ face_id: faceId, name, dob, gender, event_type: eventType, face_image: faceImage })
+      });
+      const result = await response.json();
+
+      const flashContainer = document.querySelector('.flash-container');
+      if (response.ok) {
+        flashContainer.innerHTML = `<div class="flash-message success" style="color: green; font-size: 18px;"><span style="font-weight:bold;">✓</span> ${result.message}</div>`;
+        document.getElementById('face-info-form').reset();
+        document.getElementById('face-display').style.display = 'none';
+        fetchRecognitionInfo();
+      } else {
+        flashContainer.innerHTML = `<div class="flash-message error" style="color: red;">${result.error}</div>`;
+      }
+    }
+
+    /**
+     * Hàm quan trọng: ẩn ảnh & giới tính khi sự kiện là tự động
+     * Tạm quy ước: "thủ công" = đã có gender & dob; "tự động" = thiếu gender hoặc dob
+     */
+    async function fetchRecognitionInfo() {
+      try {
+        const response = await fetch('/get_current_info');
+        const data = await response.json();
+        document.getElementById('current-count').textContent = data.current_count;
+        document.getElementById('last-update').textContent = data.last_update;
+
+        const recognitionList = document.getElementById('recognition-list');
+        recognitionList.innerHTML = "";
+
+        data.history.slice(0, 5).forEach((entry, index) => {
+          const recognized = entry.recognized_faces;
+          // isManual = có đủ gender & dob
+          const isManual = (recognized.gender && recognized.gender !== "") && 
+                           (recognized.dob && recognized.dob !== "");
+          // isAuto = ngược lại
+          const isAuto = !isManual;
+
+          // Nếu là thủ công, hiển thị ảnh + gender
+          // Nếu tự động, ẩn ảnh & ẩn gender
+          const imageHtml = isManual 
+            ? `<img src="${recognized.face_image || ''}" alt="${recognized.name || 'Không xác định'}">`
+            : "";
+          const genderText = isManual 
+            ? (recognized.gender || 'Không xác định')
+            : "";
+
+          recognitionList.innerHTML += `
+            <div class="result-item">
+              ${imageHtml}
+              <div class="result-info">
+                <span>${index + 1}. ${recognized.name || 'Không xác định'}</span>
+                <small>${genderText} - ${entry.event_type || ''}</small>
+              </div>
+            </div>`;
+        });
+
+        const historyList = document.getElementById('history-list');
+        historyList.innerHTML = data.history.map(entry => {
+          const recognized = entry.recognized_faces;
+          return `<li><strong>${entry.timestamp}:</strong> ${recognized.name || ''} (Ngày sinh: ${recognized.dob || ''}, Giới tính: ${recognized.gender || ''}) - ${entry.event_type}</li>`;
+        }).join('');
+
+        if (data.history.length > 0 && data.history[0].event_type === "Ra") {
+          const lastEventTimestamp = data.history[0].timestamp;
+          if (window.lastProcessedRaTimestamp !== lastEventTimestamp) {
+            window.lastProcessedRaTimestamp = lastEventTimestamp;
+            await handleFeeButton();
+            if (currentInvoice) downloadInvoice();
+          }
+        }
+      } catch (error) {
+        console.error("Lỗi khi tải dữ liệu:", error);
+      }
+    }
+
+    // Cập nhật thông tin mỗi 3 giây
+    setInterval(fetchRecognitionInfo, 3000);
+  </script>
+
+  <!-- Script face-api.js: nhận diện và vẽ bounding box -->
+  <script>
+    const videoElem = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const ctx = overlay.getContext('2d');
+    let faceMatcher = null;
+    // Đối tượng lưu thời gian ghi nhận sự kiện cuối cùng cho mỗi face_id
+    const lastEventTimestamps = {};
+    const EVENT_COOLDOWN_MS = 10000; 
+
+    async function loadModels() {
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+        faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+        faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+        faceapi.nets.ageGenderNet.loadFromUri('/models')
+      ]);
+      console.log("All models loaded");
+    }
+
+    async function loadKnownFaces() {
+      const response = await fetch('/get_known_faces');
+      const data = await response.json();
+      const labeledDescriptors = [];
+
+      for (const face of data) {
+        try {
+          const img = await faceapi.fetchImage(face.image_url);
+          const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+          if (detection) {
+            labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(face.name, [detection.descriptor]));
+          }
+        } catch (err) {
+          console.error("Error loading known face:", err);
+        }
+      }
+
+      if (labeledDescriptors.length > 0) {
+        
+        faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.44);
+        console.log("FaceMatcher created với", labeledDescriptors.length, "khuôn mặt đã biết");
+      }
+    }
+
+    async function startVideo() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+        videoElem.srcObject = stream;
+      } catch (err) {
+        console.error("Cannot access webcam:", err);
+      }
+    }
+
+    videoElem.addEventListener('play', () => {
+      overlay.width = videoElem.videoWidth;
+      overlay.height = videoElem.videoHeight;
+
+      setInterval(async () => {
+        const detections = await faceapi.detectAllFaces(videoElem, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptors()
+          .withAgeAndGender();
+
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        detections.forEach(async (det) => {
+          const box = det.detection.box;
+          let labelText = "";
+          let color = "red";
+
+          const gender = det.gender;
+          const genderProb = det.genderProbability;
+          const age = det.age;
+
+          if (faceMatcher) {
+            const bestMatch = faceMatcher.findBestMatch(det.descriptor);
+            if (bestMatch.label !== "unknown") {
+              color = "green";
+              labelText = bestMatch.label;
+              if (currentMode === "auto") {
+                // Gọi hàm xử lý tự động (auto) với cooldown
+                await handleAutoRecognition(bestMatch.label, det.descriptor);
+              }
+            } else {
+              labelText = "Unknown";
+            }
+          } else {
+            labelText = "Unknown";
+          }
+
+          // Hiển thị thêm giới tính, độ tin cậy, tuổi (nếu muốn)
+          labelText += ` - ${gender} (${(genderProb * 100).toFixed(1)}%) - ${age.toFixed(1)} tuổi`;
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+          const textX = box.x;
+          const textY = box.y + box.height + 20;
+          ctx.font = "16px Arial";
+          const textWidth = ctx.measureText(labelText).width;
+          const textHeight = 16;
+
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.rect(textX, textY - textHeight, textWidth + 10, textHeight + 5);
+          ctx.fill();
+
+          ctx.fillStyle = "black";
+          ctx.fillText(labelText, textX + 5, textY - 2);
+        });
+      }, 300);
+    });
+
+    async function handleAutoRecognition(name, descriptor) {
+      try {
+        // Gọi API để lấy face_id theo name
+        const response = await fetch('/get_face_id_by_name', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        const data = await response.json();
+        const face_id = data.face_id;
+        if (!face_id) {
+          console.error("Không tìm thấy face_id cho tên:", name);
+          return;
+        }
+
+        // Kiểm tra cooldown
+        const now = Date.now();
+        if (lastEventTimestamps[face_id] && (now - lastEventTimestamps[face_id]) < EVENT_COOLDOWN_MS) {
+          console.log("Chưa đủ thời gian nghỉ cho face_id:", face_id);
+          return;
+        }
+        lastEventTimestamps[face_id] = now;
+
+        // Lấy lịch sử sự kiện
+        const historyResponse = await fetch('/get_history');
+        const history = await historyResponse.json();
+        const faceHistory = history.filter(item => item.recognized_faces.face_id === face_id);
+        let lastEvent = null;
+        if (faceHistory.length > 0) {
+          faceHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          lastEvent = faceHistory[0].event_type;
+        }
+
+        // Nếu sự kiện cuối là "Vào" => tạo "Ra", ngược lại => "Vào"
+        const newEvent = (lastEvent === "Vào") ? "Ra" : "Vào";
+
+        // Gửi thông tin sự kiện mới đến server
+        const saveResponse = await fetch('/save_info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ face_id, name, dob: "", gender: "", event_type: newEvent, face_image: "" })
+        });
+
+        if (saveResponse.ok) {
+          console.log(`Đã ghi nhận sự kiện "${newEvent}" cho ${name}`);
+          showAutoNotification(`Đã ghi nhận "${newEvent}" cho ${name}`);
+          if (newEvent === "Ra") {
+            await handleFeeButton();
+            if (currentInvoice) downloadInvoice();
+          }
+        } else {
+          console.error("Lỗi khi ghi nhận sự kiện:", await saveResponse.json());
+        }
+      } catch (error) {
+        console.error("Lỗi trong handleAutoRecognition:", error);
+      }
+    }
+
+    (async () => {
+      await loadModels();
+      await loadKnownFaces();
+      await startVideo();
+    })();
+  </script>
+</body>
+</html>
